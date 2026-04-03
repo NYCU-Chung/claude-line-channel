@@ -121,7 +121,7 @@ LINE_CHANNEL_SECRET=<secret> bun examples/line-router.ts
 
 - **LINE 每個頻道只允許一個 webhook URL。** 若要讓多個 Claude Code session 共用同一個 LINE 頻道（例如每個群組各一個 session），請使用 `examples/line-router.ts` 將 webhook 分發到各 session 的 port。沒有這個中間層，只有一個 session 能收到訊息。
 - **Reply token 在 30 秒後失效。** Plugin 在每則訊息到達後的 30 秒內使用免費的 Reply API 回覆，之後改用需要扣配額的 Push API。若 Claude 回應超過 30 秒，該次回覆會消耗 Push API 配額。
-- **LINE 沒有訊息歷史 API。** 機器人只看得到它正在運行時收到的訊息。Session 重啟後，先前的對話脈絡會遺失，除非自行處理（例如讀取 `history.log`）。
+- **LINE 沒有訊息歷史 API。** 機器人只看得到它正在運行時收到的訊息。Claude Code 會自動在 state 目錄維護一個滾動的 `history.log`（`~/.claude/channels/line/history.log`）——可以指示 Claude 在啟動時讀取它，以在重啟後恢復對話脈絡。
 - **用戶必須先加機器人為好友才能傳私訊。** LINE 不允許向未加為好友的機器人傳送私訊。
 - **提及偵測需要機器人的用戶 ID**，這個 ID 在啟動時非同步取得。這個過程中 webhook 會回傳 HTTP 503，LINE 會自動重試。
 - **群組 ID 與聊天室 ID 不同：** 從群組發起的多人聊天 ID 以 `C` 開頭；透過邀請建立的聊天室 ID 以 `R` 開頭。兩者不同，需在 `access.json` 中分別設定。
