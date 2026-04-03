@@ -184,6 +184,108 @@ To run multiple Claude Code sessions sharing one LINE channel, use `examples/lin
 LINE_CHANNEL_SECRET=<secret> bun examples/line-router.ts
 ```
 
+## Production deployment (tmux + watchdog)
+
+For long-running deployments, use tmux to keep sessions alive across SSH disconnects. A watchdog script handles automatic restarts when the MCP server dies.
+
+### Directory layout
+
+```
+~/line-dm/
+├── launch.sh      # tmux entry point — restart loop + rolling context pruning
+├── start.sh       # MCP server startup, referenced by mcpServers in .claude.json
+└── CLAUDE.md      # persona and instructions for Claude
+```
+
+### launch.sh
+
+```bash
+#!/bin/bash
+PROJ=~/.claude/projects/$(realpath ~/line-dm | sed 's|/|-|g' | sed 's|^-||')
+MAX_SIZE=3000000
+
+JSONL=$(ls "$PROJ"/*.jsonl 2>/dev/null | head -1)
+if [ -n "$JSONL" ] && [ "$(wc -c < "$JSONL")" -gt "$MAX_SIZE" ]; then
+  LINES=$(wc -l < "$JSONL")
+  KEEP=$(( LINES * 2000000 / $(wc -c < "$JSONL") ))
+  tail -n "$KEEP" "$JSONL" > "$JSONL.tmp" && mv "$JSONL.tmp" "$JSONL"
+fi
+
+CONTINUE=""
+ls "$PROJ"/*.jsonl 2>/dev/null | grep -q . && CONTINUE="--continue"
+
+while true; do
+  claude --dangerously-skip-permissions $CONTINUE \
+    --dangerously-load-development-channels server:line
+  CONTINUE="--continue"
+  echo "Claude exited, restarting in 5 seconds..."
+  sleep 5
+done
+```
+
+### start.sh
+
+Referenced by `mcpServers.line` in your project entry inside `~/.claude.json`. Kills any orphaned bun process holding the port before starting:
+
+```bash
+#!/bin/bash
+fuser -k 3461/tcp 2>/dev/null || true
+LINE_STATE_DIR=~/.claude/channels/line-dm \
+LINE_WEBHOOK_PORT=3461 \
+exec bun run --cwd ~/.claude/plugins/cache/claude-line-channel/line/0.1.0 start
+```
+
+Add a project entry to `~/.claude.json`:
+
+```json
+{
+  "projects": {
+    "/home/user/line-dm": {
+      "mcpServers": {
+        "line": {
+          "command": "bash",
+          "args": ["/home/user/line-dm/start.sh"]
+        }
+      }
+    }
+  }
+}
+```
+
+> **Why `mcpServers` is required**: the plugin system registers the server as `plugin:line:line`, which the channel system cannot match. A `mcpServers` entry ensures a server named exactly `line` is available.
+
+### Creating the tmux session
+
+```bash
+tmux new-session -d -s line-dm "cd ~/line-dm && bash launch.sh"
+```
+
+### Watchdog
+
+The `--dangerously-load-development-channels` flag shows a one-time confirmation dialog on startup. A watchdog handles this and restarts Claude when bun crashes:
+
+```bash
+#!/bin/bash
+# Run in a separate tmux session: tmux new-session -d -s watchdog "bash watchdog.sh"
+GRACE=0
+while true; do
+  PANE_PID=$(tmux list-panes -t line-dm -F '#{pane_pid}' 2>/dev/null | head -1)
+  # Auto-confirm the development channels dialog
+  tmux send-keys -t line-dm "" Enter 2>/dev/null
+
+  if [ "$GRACE" -le 0 ] && ! ss -tlnp | grep -q ':3461 '; then
+    CLAUDE_PID=$(pstree -p "$PANE_PID" 2>/dev/null | grep -o 'claude([0-9]*)' | head -1 | grep -o '[0-9]*')
+    if [ -n "$CLAUDE_PID" ]; then
+      echo "$(date): bun MCP server down, restarting Claude ($CLAUDE_PID)"
+      kill "$CLAUDE_PID"
+      GRACE=6  # 60-second grace period before next health check
+    fi
+  fi
+  [ "$GRACE" -gt 0 ] && GRACE=$((GRACE - 1))
+  sleep 10
+done
+```
+
 ## Known limitations and gotchas
 
 Things we discovered running this in production:
@@ -208,6 +310,55 @@ Things we discovered running this in production:
 - File upload passwords generated with `crypto.randomBytes` (96-bit entropy)
 - `.env` file chmod'd to `0600` on startup
 - Unknown group IDs sanitized before logging
+
+## Troubleshooting
+
+### `server:line · no MCP server configured with that name`
+
+Claude found a development channel (`server:line`) but has no MCP server with that name. This happens because the plugin system registers the server as `plugin:line:line`, not `line`.
+
+Fix: add a `mcpServers.line` entry to your project in `~/.claude.json` as shown in the `start.sh` section above.
+
+If the plugin cache versions are all marked orphaned, Claude will refuse to run them. Remove the markers:
+
+```bash
+rm -f ~/.claude/plugins/cache/claude-line-channel/line/*/.orphaned_at
+```
+
+### `1 MCP server failed` in the status bar
+
+The MCP server crashed during startup. Most common cause: an orphaned bun process is holding the webhook port. Add `fuser -k <port>/tcp` at the top of `start.sh` to clear it on each restart.
+
+To debug manually:
+
+```bash
+LINE_STATE_DIR=~/.claude/channels/line-dm LINE_WEBHOOK_PORT=3461 bash ~/line-dm/start.sh
+```
+
+### Webhook arrives but Claude does not respond
+
+1. Confirm bun is running: `ss -tlnp | grep 3461`
+2. Check for orphaned bun processes: `ps -u $(whoami) -o pid,ppid,cmd | grep bun`
+3. Test the webhook path directly (bypassing line-router):
+   ```bash
+   SECRET=$(grep LINE_CHANNEL_SECRET ~/.claude/channels/line-dm/.env | cut -d= -f2)
+   PAYLOAD='{"destination":"U0","events":[{"type":"message","mode":"active","timestamp":1000000000000,"source":{"type":"user","userId":"Utest"},"webhookEventId":"ev1","deliveryContext":{"isRedelivery":false},"message":{"id":"m1","type":"text","quoteToken":"q","text":"ping"}}]}'
+   SIG=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET" -binary | base64)
+   curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:3461/webhook \
+     -H "Content-Type: application/json" -H "x-line-signature: $SIG" -d "$PAYLOAD"
+   ```
+   Expected: `200`. A `403` means the HMAC secret is wrong.
+4. Watch the Claude session for the `← line ·` notification: `tmux capture-pane -t line-dm -p | tail -20`
+
+### Messages marked read but Claude does not reply
+
+When running multiple sessions via line-router, check whether the router is forwarding correctly:
+
+```bash
+tmux capture-pane -t line-router -p | grep error | tail -10
+```
+
+`Unable to connect` errors for unused ports are harmless — only the port matching the active session matters.
 
 ## License
 
