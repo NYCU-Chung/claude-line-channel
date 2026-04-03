@@ -2,9 +2,9 @@
 
 [繁體中文](./README.zh-TW.md) | English
 
-Connect a LINE bot to your Claude Code with an MCP server.
+Claude Code's channel system lets messaging platforms connect directly to a Claude Code session. This plugin adds **LINE** support — the only third-party LINE channel plugin available. Official support currently covers only Discord and Telegram.
 
-When someone messages the bot, the MCP server forwards the message to Claude and provides tools to reply. Claude can respond to DMs and group chats, download media, and send images — all from within a Claude Code session.
+Connect a LINE bot to your Claude Code with an MCP server. When someone messages the bot, the server forwards the message to Claude and provides tools to reply. Claude can respond to DMs and group chats, download media, and send images — all from within a Claude Code session.
 
 ## Prerequisites
 

@@ -2,9 +2,9 @@
 
 [English](./README.md) | 繁體中文
 
-透過 MCP server 將 LINE 機器人接入 Claude Code。
+Claude Code 的 channel 系統讓訊息平台可以直接接入 Claude Code session。這個 plugin 新增了 **LINE** 支援——目前是唯一的第三方 LINE channel plugin。官方目前只支援 Discord 和 Telegram。
 
-當有人傳訊息給機器人時，MCP server 會將訊息轉發給 Claude，並提供工具讓 Claude 回覆。Claude 可以回應私訊和群組訊息、下載媒體檔案、傳送圖片——全部在 Claude Code session 內完成。
+透過 MCP server 將 LINE 機器人接入 Claude Code。當有人傳訊息給機器人時，MCP server 會將訊息轉發給 Claude，並提供工具讓 Claude 回覆。Claude 可以回應私訊和群組訊息、下載媒體檔案、傳送圖片——全部在 Claude Code session 內完成。
 
 ## 事前準備
 
