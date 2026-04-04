@@ -20,7 +20,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { createHmac, createHash, randomBytes, timingSafeEqual } from 'crypto'
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto'
 import {
   readFileSync, writeFileSync, mkdirSync, renameSync, chmodSync, appendFileSync,
   realpathSync,
@@ -579,9 +579,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         }
 
         // Cryptographically secure random password (96 bits).
-        // gofile's download page SHA256-hashes user input before verifying — store the hash, return the raw password.
-        const pw     = randomBytes(12).toString('base64url')
-        const pwHash = createHash('sha256').update(pw).digest('hex')
+        const pw = randomBytes(12).toString('base64url')
 
         const fileBlob = new Blob([await Bun.file(resolved).arrayBuffer()])
         const fname = resolved.split('/').pop() ?? 'file'
@@ -603,7 +601,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const headers = { 'Content-Type': 'application/json' }
         const pwRes = await fetch(`https://api.gofile.io/contents/${up.parentFolder}/update`, {
           method: 'PUT', headers,
-          body: JSON.stringify({ token: up.guestToken, attribute: 'password', attributeValue: pwHash }),
+          body: JSON.stringify({ token: up.guestToken, attribute: 'password', attributeValue: pw }),
         })
         if (!pwRes.ok) throw new Error('gofile: failed to set password: ' + await pwRes.text())
         const expRes = await fetch(`https://api.gofile.io/contents/${up.parentFolder}/update`, {
