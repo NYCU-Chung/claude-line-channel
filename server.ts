@@ -36,7 +36,8 @@ const STATE_DIR   = process.env.LINE_STATE_DIR ?? join(homedir(), '.claude', 'ch
 const ACCESS_FILE = join(STATE_DIR, 'access.json')
 const ENV_FILE    = join(STATE_DIR, '.env')
 const INBOX_DIR   = join(STATE_DIR, 'inbox')
-const UNKNOWN_LOG = join(STATE_DIR, 'unknown-groups.log')
+const UNKNOWN_LOG  = join(STATE_DIR, 'unknown-groups.log')
+const HISTORY_LOG  = join(STATE_DIR, 'history.log')
 
 mkdirSync(INBOX_DIR, { recursive: true, mode: 0o700 })
 
@@ -679,6 +680,10 @@ async function handleInbound(event: LineMessageEvent): Promise<void> {
   } else {
     content = '[' + msgType.toUpperCase() + ' — call get_content(message_id: "' + event.message.id + '") to view]'
   }
+
+  // Append to rolling history log so Claude can restore context after restart
+  const logLine = `[${ts}] [${src.type}:${chat_id}] [user:${src.userId}] ${content}\n`
+  try { appendFileSync(HISTORY_LOG, logLine) } catch {}
 
   mcp.notification({
     method: 'notifications/claude/channel',
